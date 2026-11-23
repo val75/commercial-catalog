@@ -1,0 +1,7 @@
+Line,Part Number,Description,Qty,Unit Price
+1,P58// R,ProLiant DL380 Gen11 2U chassis,4,3120.00
+2,P49// A,Intel Xeon Gold 6426Y 16C 2.5GHz,8,1180.00
+3,P06// B,32GB DDR5-4800 RDIMM,32,210.00
+4,P28// H,2.4TB SAS 10K SFF HDD,32,265.00
+5,P51// N,Broadcom 4x1GbE + 2x10GbE FLR,4,340.00
+6,P03// P,800W Flex Slot Platinum PSU,8,190.00

@@ -1,0 +1,37 @@
+From: sales@dataframe-servers.com
+Sent: Tuesday, July 29, 2026 4:12 PM
+To: procurement@ourco.com
+Subject: RE: Q3 compute refresh â€” two options
+
+
+Hi â€” following up with pricing on the two builds we discussed. Both are quoted
+in USD, valid 30 days from today.
+
+OPTION A â€” Dell PowerEdge R660 (1U)
+  Quote #: DF-Q-88214
+  Qty: 8
+  2x Intel Xeon Gold 6438N 32C 2.0GHz
+  512GB (16x32GB) DDR5-4800 RDIMM
+  2x 480GB SATA SSD (BOSS boot), 6x 3.84TB NVMe U.2
+  Broadcom 57508 2x25GbE
+  2x 1100W Titanium PSU
+  Unit price: $14,280
+
+OPTION B â€” Supermicro AS-1115CS-TNR (1U)
+  Quote #: DF-Q-88215
+  Qty: 12
+  1x AMD EPYC 9354P 32-core
+  384GB DDR5 (12x32GB)
+  4x 7.68TB Gen5 NVMe
+  Dual 10GbE onboard
+  2x 860W redundant PSU
+  Unit price: $11,950
+
+Let me know which way you want to go and I can lock pricing.
+
+Thanks,
+Dana Whitfield
+Senior Account Executive | DataFrame Servers
+Mobile: (555) 019-2284
+This email and any attachments are confidential and intended solely for the
+addressee. If you received this in error please delete it.

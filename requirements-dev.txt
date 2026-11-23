@@ -1,0 +1,4 @@
+# Everything in requirements.txt, plus tools for tests and fixture generation
+-r requirements.txt
+pytest>=8.0
+reportlab>=4.0     # used by make_fixtures.py and the PDF tests to build sample PDFs
