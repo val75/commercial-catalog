@@ -26,12 +26,14 @@ pytestmark = [
 
 def test_parts_continued_on_the_next_page_stay_with_their_server():
     # The network adapter is on page 2. The model once made it an item of its
-    # own and lost the drives and GPU at the end of page 1.
+    # own and lost the drives and GPU at the end of page 1. The DPU is on page 2
+    # too, and is recorded since 09-dpu.md (2026-11-23).
     [draft] = extract_quotes(PDF.read_text(encoding="utf-8"), source_name=PDF.name)
     [item] = draft.items
     assert item.chassis is not None
     assert sorted(component.component_type for component in item.components) == [
         "cpu",
+        "dpu",
         "gpu",
         "memory",
         "nic",

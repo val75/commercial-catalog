@@ -14,8 +14,12 @@ from extraction.schema import (
     ItemChassis,
     PsuComponent,
     PsuProperties,
+    RaidControllerComponent,
+    RaidControllerProperties,
     Basis,
     ComponentType,
+    DpuComponent,
+    DpuProperties,
     CpuComponent,
     ExtractionResult,
     GenericComponent,
@@ -693,17 +697,19 @@ def test_json_schema_forbids_extra_properties_on_every_object():
 
 
 def test_json_schema_offers_only_the_types_that_have_a_spec_file():
-    # Only CPU, memory, GPU, storage, network adapters, power supplies and chassis have reviewed spec files, so the model
+    # Only CPU, memory, GPU, storage, network adapters, power supplies, chassis, RAID controllers and DPUs have reviewed spec files, so the model
     # extracts nothing else. A free-form "specs" on a network card once ran away
     # into "other_other_other_notes": "None" until the token limit.
     defs = extraction_json_schema()["$defs"]
     choices = defs["QuoteItem"]["properties"]["components"]["items"]["anyOf"]
     assert sorted(choice["$ref"] for choice in choices) == [
         "#/$defs/CpuComponent",
+        "#/$defs/DpuComponent",
         "#/$defs/GpuComponent",
         "#/$defs/MemoryComponent",
         "#/$defs/NicComponent",
         "#/$defs/PsuComponent",
+        "#/$defs/RaidControllerComponent",
         "#/$defs/StorageComponent",
     ]
     assert "GenericComponent" not in defs
@@ -947,3 +953,147 @@ def test_json_schema_puts_an_items_chassis_before_its_components():
     # The model writes in schema order, so it fills the chassis from the item's own line first.
     order = list(extraction_json_schema()["$defs"]["QuoteItem"]["properties"])
     assert order.index("chassis") < order.index("components")
+
+
+# --- RAID controllers (08-raid-controller.md) -----------------------------------------------
+
+
+def _raid(**overrides) -> dict:
+    return {"component_type": "raid_controller", **overrides}
+
+
+def test_a_raid_controller_has_exactly_the_properties_its_spec_lists():
+    # 08-raid-controller.md section 2, with Vendor Product ID added as for the other parts (2026-11-23).
+    assert list(RaidControllerProperties.model_fields) == [
+        "manufacturer",
+        "product_family",
+        "model",
+        "mpn",
+        "vendor_product_id",
+        "controller_type",
+        "host_interface",
+        "external_ports",
+        "internal_ports",
+        "supported_drive_interfaces",
+        "max_drive_count",
+        "raid_levels",
+        "cache_capacity_gb",
+        "cache_protection",
+        "boot_support",
+    ]
+
+
+def test_a_raid_controller_line_gets_its_own_shape():
+    controller = _parse_component(
+        _raid(
+            raid_controller={
+                "model": {"value": "RC-9500-16i", "basis": "stated"},
+                "controller_type": {"value": "Tri-Mode", "basis": "inferred", "reason": "The exact model is tri-mode."},
+                "internal_ports": {"value": "2 x SFF-8654 x8", "basis": "stated"},
+                "cache_capacity_gb": {"value": 8, "as_written": "8GB cache", "basis": "stated"},
+                "boot_support": {"value": True, "basis": "stated"},
+            },
+            quantity=2,
+            quantity_basis="per_unit",
+        )
+    )
+    assert isinstance(controller, RaidControllerComponent)
+    props = controller.raid_controller
+    assert (props.model.value, props.controller_type.basis) == ("RC-9500-16i", Basis.INFERRED)
+    assert (props.internal_ports.value, props.external_ports) == ("2 x SFF-8654 x8", None)
+    assert (props.cache_capacity_gb.value, props.cache_capacity_gb.as_written) == (8, "8GB cache")
+    assert props.boot_support.value is True
+    assert (controller.quantity, controller.quantity_basis) == (2, QuantityBasis.PER_UNIT)
+
+
+def test_an_hba_is_a_raid_controller_of_type_hba():
+    # 08-raid-controller.md covers HBAs and tri-mode cards as controller types (decided 2026-11-23).
+    hba = _parse_component(_raid(raid_controller={"controller_type": {"value": "HBA", "basis": "stated"}}))
+    assert hba.raid_controller.controller_type.value == "HBA"
+    with pytest.raises(ValidationError):
+        _parse_component(_component(component_type="hba"))
+
+
+def test_a_raid_controller_is_no_longer_a_generic_line():
+    with pytest.raises(ValidationError):
+        GenericComponent.model_validate({"component_type": "raid_controller", "raw_text": "1x Example RAID card"})
+
+
+@pytest.mark.parametrize("extra", ["raid_level_configured", "drives_connected", "virtual_disks"])
+def test_a_raid_controller_refuses_its_configuration_as_a_property(extra):
+    # Arrays, connected drives and the RAID level in use belong to the System Library
+    # configuration (08-raid-controller.md section 6).
+    with pytest.raises(ValidationError):
+        _parse_component(_raid(raid_controller={extra: {"value": "RAID 1", "basis": "stated"}}))
+
+
+def test_a_raid_controller_can_carry_a_note_and_flags():
+    controller = _parse_component(_raid(note="boot mirror", review_flags=["Several controllers match."]))
+    assert (controller.note, controller.review_flags) == ("boot mirror", ["Several controllers match."])
+
+
+# --- DPUs (09-dpu.md) -------------------------------------------------------------------------
+
+
+def _dpu(**overrides) -> dict:
+    return {"component_type": "dpu", **overrides}
+
+
+def test_a_dpu_has_exactly_the_properties_its_spec_lists():
+    # 09-dpu.md section 2, with Vendor Product ID (rule 3) and the crypto variant, as for
+    # network adapters, added (approved 2026-11-23).
+    assert list(DpuProperties.model_fields) == [
+        "manufacturer",
+        "product_family",
+        "model",
+        "mpn",
+        "vendor_product_id",
+        "processor_architecture",
+        "cpu_cores",
+        "network_technology",
+        "port_count",
+        "port_speed_gbps",
+        "port_connector",
+        "host_interface",
+        "onboard_memory_gb",
+        "hardware_acceleration",
+        "storage_connectivity",
+        "form_factor",
+        "crypto",
+    ]
+
+
+def test_a_dpu_line_gets_its_own_shape():
+    dpu = _parse_component(
+        _dpu(
+            dpu={
+                "model": {"value": "DX-3 D3220", "basis": "stated"},
+                "port_count": {"value": 2, "basis": "stated"},
+                "port_speed_gbps": {"value": 200, "as_written": "200GbE", "basis": "stated"},
+                "onboard_memory_gb": {"value": 32, "as_written": "32GB DDR5", "basis": "stated"},
+                "crypto": {"value": "Crypto Enable", "basis": "stated"},
+            },
+            quantity=4,
+            quantity_basis="order_total",
+        )
+    )
+    assert isinstance(dpu, DpuComponent)
+    assert (dpu.dpu.port_count.value, dpu.dpu.port_speed_gbps.value, dpu.dpu.crypto.value) == (2, 200, "Crypto Enable")
+    assert dpu.dpu.onboard_memory_gb.as_written == "32GB DDR5"
+    assert (dpu.quantity, dpu.quantity_basis) == (4, QuantityBasis.ORDER_TOTAL)
+
+
+def test_dpu_cores_and_ports_are_whole_numbers():
+    with pytest.raises(ValidationError):
+        _parse_component(_dpu(dpu={"cpu_cores": {"value": 16.5, "basis": "stated"}}))
+
+
+def test_a_dpu_refuses_its_configuration_as_a_property():
+    # Enabled offloads and the deployment role belong to the System Library configuration (09-dpu.md section 6).
+    with pytest.raises(ValidationError):
+        _parse_component(_dpu(dpu={"operating_mode": {"value": "DPU mode", "basis": "stated"}}))
+
+
+def test_a_dpu_can_carry_a_note_and_flags():
+    dpu = _parse_component(_dpu(note="for storage offload", review_flags=["Several variants match."]))
+    assert (dpu.note, dpu.review_flags) == ("for storage offload", ["Several variants match."])

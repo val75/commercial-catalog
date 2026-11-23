@@ -8,7 +8,8 @@ stage 4). It's a proposal, so it stays deliberately forgiving:
   review issue. Rejecting a draft here would lose it instead.
 - Nearly every field is optional, because any given quote may not state it.
 - Component types with a spec file in docs/03-component-library/ get their own
-  shape holding only the properties that file lists (so far: CPU, memory, GPU and storage). The other
+  shape holding only the properties that file lists (so far: CPU, memory, GPU, storage, network
+  adapters, DPUs, power supplies, RAID controllers, and the chassis on the item). The other
   types share a generic shape until their spec files are written.
 - It holds no catalog IDs, match states, confidence scores or provenance. Later
   stages and the dispatch layer add those, and the model should never invent them.
@@ -39,9 +40,9 @@ class ComponentType(str, Enum):
     GPU = "gpu"
     ACCELERATOR = "accelerator"
     NIC = "nic"
+    DPU = "dpu"
     PSU = "psu"
-    RAID_CONTROLLER = "raid_controller"
-    HBA = "hba"
+    RAID_CONTROLLER = "raid_controller"  # HBAs and tri-mode cards too (08-raid-controller.md)
     TPM = "tpm"
     FAN = "fan"
     CABLE = "cable"
@@ -372,7 +373,7 @@ class NicProperties(_Draft):
 
     The properties docs/03-component-library/05-network-adapter.md lists, in its
     order, with the changes approved on 2026-11-16 (Vendor Product ID and Crypto
-    added, maximum power dropped). DPUs and onboard ports aren't adapters (rules 21-22).
+    added, maximum power dropped). DPUs (their own type) and onboard ports aren't adapters (rules 21-22).
     """
 
     manufacturer: Property[str] | None = Field(default=None, description="Such as NVIDIA, Intel or Broadcom.")
@@ -425,6 +426,84 @@ class NicComponent(_Draft):
         default_factory=list,
         description="More than one adapter could match, a value depends on the variant, "
         "or the document contradicts itself.",
+    )
+
+
+class DpuProperties(_Draft):
+    """The DPU's identity and specifications: the reusable library record.
+
+    The properties docs/03-component-library/09-dpu.md lists, in its order, with
+    Vendor Product ID (rule 3) and the crypto variant, as for network adapters,
+    added (approved 2026-11-23). A DPU's own network ports are part of it, never a
+    separate network adapter (section 5).
+    """
+
+    manufacturer: Property[str] | None = Field(default=None, description="Such as NVIDIA or AMD.")
+    product_family: Property[str] | None = Field(default=None, description="Such as BlueField or Pensando.")
+    model: Property[str] | None = Field(
+        default=None, description="The commercial model, with its generation and variant, such as BlueField-2 MBF2M516A."
+    )
+    mpn: Property[str] | None = Field(default=None, description="The manufacturer's part number, never the vendor's code.")
+    vendor_product_id: Property[str] | None = Field(default=None, description="The vendor's own product code or SKU.")
+    processor_architecture: Property[str] | None = Field(
+        default=None,
+        description="The DPU's own cores, such as Arm Cortex-A78, never the host's CPU. Only as written, never inferred.",
+    )
+    cpu_cores: Property[int] | None = Field(
+        default=None,
+        description="The DPU's general-purpose cores, never host cores or accelerator engines. Only as written, never inferred.",
+    )
+    network_technology: Property[str] | None = Field(
+        default=None, description="Ethernet and InfiniBand for an IB/EN or VPI card; otherwise such as Ethernet or InfiniBand."
+    )
+    port_count: Property[int] | None = Field(default=None, description="Physical network ports.")
+    port_speed_gbps: Measured[float] | None = Field(
+        default=None,
+        description="The maximum speed of one port, in Gb/s, never the total across ports, with the quote's wording "
+        "in as_written when it's converted or several speeds are listed.",
+    )
+    port_connector: Property[str] | None = Field(default=None, description="Such as QSFP112, QSFP56 or SFP56.")
+    host_interface: Property[str] | None = Field(
+        default=None, description="The connection to the server, such as PCIe 5.0 x16, never the network ports."
+    )
+    onboard_memory_gb: Measured[float] | None = Field(
+        default=None,
+        description="The DPU's own memory in GB, never host or GPU memory, with the type, such as DDR5, in as_written. "
+        "Only as written, never inferred.",
+    )
+    hardware_acceleration: Property[str] | None = Field(
+        default=None,
+        description="The hardware engines in the manufacturer's terms, such as packet processing, compression. "
+        "Only as written, never inferred.",
+    )
+    storage_connectivity: Property[str] | None = Field(
+        default=None, description="Such as NVMe, NVMe-oF. Only as written, never inferred."
+    )
+    form_factor: Property[str] | None = Field(
+        default=None, description="Such as PCIe full-height, PCIe low-profile or OCP 3.0. Never from the host interface alone."
+    )
+    crypto: Property[str] | None = Field(
+        default=None, description="The crypto variant exactly as written, such as Crypto Enable or NoCrypto. Never inferred."
+    )
+
+
+class DpuComponent(_Draft):
+    """A DPU line of a configuration."""
+
+    component_type: Literal["dpu"]
+    dpu: DpuProperties = Field(default_factory=DpuProperties)
+    # As for CPUs: read to work out the DPUs installed per server, which is what's stored.
+    quantity: int | None = None
+    quantity_basis: QuantityBasis = QuantityBasis.UNKNOWN
+    unit_price: Money | None = Field(default=None, description="Only if the vendor prices DPUs separately.")
+    note: str | None = Field(
+        default=None,
+        description="Context the quote gives about this part that no property holds, as written, such as "
+        "\"BOSS boot\". Never a specification.",
+    )
+    review_flags: list[str] = Field(
+        default_factory=list,
+        description="More than one DPU could match, a value depends on the variant, or the document contradicts itself.",
     )
 
 
@@ -487,6 +566,78 @@ class PsuComponent(_Draft):
         default_factory=list,
         description="More than one power supply could match, the rating depends on the input voltage, "
         "or the document contradicts itself.",
+    )
+
+
+class RaidControllerProperties(_Draft):
+    """The storage controller's identity and specifications: the reusable library record.
+
+    The properties docs/03-component-library/08-raid-controller.md lists, in its
+    order, with Vendor Product ID added as for the other parts (2026-11-23). It
+    covers hardware RAID controllers, HBAs and tri-mode cards; RAID built into the
+    motherboard isn't a controller (section 1). What it can do, never how it's set
+    up: arrays, connected drives and the RAID level in use belong to the System
+    Library configuration (section 6).
+    """
+
+    manufacturer: Property[str] | None = Field(default=None, description="Such as Broadcom or Microchip.")
+    product_family: Property[str] | None = Field(default=None, description="The manufacturer's series, such as MegaRAID.")
+    model: Property[str] | None = Field(default=None, description="The commercial model designation, such as MegaRAID 9560-16i.")
+    mpn: Property[str] | None = Field(default=None, description="The manufacturer's part number, never the vendor's code.")
+    vendor_product_id: Property[str] | None = Field(default=None, description="The vendor's own product code or SKU.")
+    controller_type: Property[str] | None = Field(
+        default=None,
+        description="Hardware RAID, HBA or Tri-Mode. An HBA isn't a RAID controller just because it connects drives.",
+    )
+    host_interface: Property[str] | None = Field(
+        default=None, description="The connection to the server, never the drives, such as PCIe 4.0 x8."
+    )
+    external_ports: Property[str] | None = Field(
+        default=None, description="Count and connector, such as 4 x SFF-8644. Only as written, never inferred."
+    )
+    internal_ports: Property[str] | None = Field(
+        default=None, description="Count and connector, such as 2 x SFF-8654 x8. Only as written, never inferred."
+    )
+    supported_drive_interfaces: Property[str] | None = Field(
+        default=None, description="Such as SAS, SATA, NVMe. Only as written, never from the connector."
+    )
+    max_drive_count: Property[int] | None = Field(
+        default=None,
+        description="The maximum the manufacturer supports, never the drives in the server. Only as written, never inferred.",
+    )
+    raid_levels: Property[str] | None = Field(
+        default=None, description="Exactly the supported levels, such as RAID 0, 1, 5, 6, 10. Only as written, never inferred."
+    )
+    cache_capacity_gb: Measured[float] | None = Field(
+        default=None,
+        description="The controller's own cache, in GB, never system memory. Only as written, never inferred.",
+    )
+    cache_protection: Property[str] | None = Field(
+        default=None,
+        description="Such as CacheVault, flash-backed or battery-backed. Never for ordinary cache. Only as written, never inferred.",
+    )
+    boot_support: Property[bool] | None = Field(
+        default=None, description="True only when written that it can boot from its drives. Only as written, never inferred."
+    )
+
+
+class RaidControllerComponent(_Draft):
+    """A RAID controller, HBA or tri-mode controller line of a configuration."""
+
+    component_type: Literal["raid_controller"]
+    raid_controller: RaidControllerProperties = Field(default_factory=RaidControllerProperties)
+    # As for CPUs: read to work out the controllers installed per server, which is what's stored.
+    quantity: int | None = None
+    quantity_basis: QuantityBasis = QuantityBasis.UNKNOWN
+    unit_price: Money | None = Field(default=None, description="Only if the vendor prices controllers separately.")
+    note: str | None = Field(
+        default=None,
+        description="Context the quote gives about this part that no property holds, as written, such as "
+        "\"BOSS boot\". Never a specification.",
+    )
+    review_flags: list[str] = Field(
+        default_factory=list,
+        description="More than one controller could match, the type isn't clear, or the document contradicts itself.",
     )
 
 
@@ -567,7 +718,9 @@ SPECIFIED_TYPES = {
     ComponentType.GPU,
     ComponentType.STORAGE,
     ComponentType.NIC,
+    ComponentType.DPU,
     ComponentType.PSU,
+    ComponentType.RAID_CONTROLLER,
     ComponentType.CHASSIS,  # on the quote item, not among its components
 }
 GenericComponentType = Literal[tuple(t.value for t in ComponentType if t not in SPECIFIED_TYPES)]
@@ -598,7 +751,9 @@ Component = Union[
     GpuComponent,
     StorageComponent,
     NicComponent,
+    DpuComponent,
     PsuComponent,
+    RaidControllerComponent,
     GenericComponent,
 ]
 

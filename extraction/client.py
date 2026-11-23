@@ -48,7 +48,7 @@ Write compact JSON on a single line, with no indentation, line breaks or spaces 
 - If the same content appears more than once, such as a page repeated as a table, record it only once.
 - Set "quantity_basis" to "per_unit" when a component's quantity is for one server, "order_total" when it covers the whole order, and "unknown" when the document doesn't make that clear.
 - To tell them apart, compare the counts under a line with the line's own quantity. If something every server has exactly once, such as the chassis or base system, a warranty or an assembly fee, has the same count as the line (a line of 4 servers with a chassis "(x4)"), the counts under that line cover the whole order: use "order_total" for all of them. "2x CPU" under a line of 8 servers is "per_unit".
-- Record only CPU, memory, GPU, storage, network adapter ("nic") and power supply ("psu") components. Leave out everything else, such as DPUs, network ports built into the motherboard, cables, warranties, support, licenses and fees.
+- Record only CPU, memory, GPU, storage, network adapter ("nic"), DPU ("dpu"), power supply ("psu") and RAID controller ("raid_controller") components. Leave out everything else, such as network ports or RAID built into the motherboard, cables, warranties, support, licenses and fees.
 - Infer a part's properties only from that part's own manufacturer, model or part number, never from the server or chassis it's installed in.
 - Every property must be answered: give its value, or null if it's unknown. Don't leave a component's properties empty when the document states them.
 - A "review_flags" entry is one short sentence for the person reviewing the quote, such as "Several modules match this description." Never think aloud in it; put values in their properties instead.
@@ -75,7 +75,7 @@ Write compact JSON on a single line, with no indentation, line breaks or spaces 
 - "interface" is text, such as "PCIe 5.0 x16" or "SXM5". If you complete it from your own knowledge, such as adding x16 to a stated "PCIe 5", mark it "inferred" and say in the "reason" which part the document states.
 - Fill the NVLink properties only when the document states them, or the exact model establishes them reliably.
 - Add a "review_flags" entry when more than one GPU could match, when a value depends on a card variant or power configuration the model name doesn't settle, or when the document contradicts itself.
-- A DPU, such as BlueField, isn't a GPU or a network adapter, even if the vendor's code starts with "GPU": leave it out.
+- A DPU, such as BlueField, isn't a GPU or a network adapter, even if the vendor's code starts with "GPU".
 - For a drive, fill only the properties in "storage", in the same {"value", "basis"} form as for a CPU. When the manufacturer and model identify the drive precisely, infer the missing specifications from your own knowledge and give the "reason", except flash technology, which you record only if the document or the manufacturer states it.
 - Each storage line is its own group of identical drives. Never combine lines.
 - "mpn" and "model" are the drive manufacturer's codes, never the vendor's. If a vendor's code contains one, such as a manufacturer's part number after the vendor's prefix, give it exactly as written, mark it "inferred", and add a review flag that it may be shortened.
@@ -105,6 +105,20 @@ Write compact JSON on a single line, with no indentation, line breaks or spaces 
 - For a chassis, fill only the properties in "chassis", in the same {"value", "basis"} form as for a CPU. Infer only the identity, chassis type, form factor and rack height, from the exact model or the line itself, such as "Rackmount" for a 2U server, and give the "reason". Record dimensions, drive bays, expansion slots, power supply bays and cooling only as written.
 - A chassis's properties are what it supports, never the parts installed in it: "drive_bays" counts bays, not drives, and "psu_bays" counts positions, not power supplies.
 - "model" is the chassis's own designation when the document names one, such as "CHASSIS CSE-X400". If it gives only the server's or base system's model, use that and add the review flag "This is the server's model, not the chassis's own." "manufacturer" is the chassis's maker, only when the document names it or the exact model establishes it.
+- A "raid_controller" is a dedicated storage controller card: a hardware RAID controller, an HBA or a tri-mode controller. Record one only when the document lists it as its own part, never because drives are described as "RAID 1" or "BOSS boot".
+- For a RAID controller, fill only the properties in "raid_controller", in the same {"value", "basis"} form as for a CPU. Infer only the identity, "controller_type" and "host_interface", from the exact model, and give the "reason". Record ports, drive interfaces, maximum drive count, RAID levels, cache, cache protection and boot support only as written.
+- "controller_type" is "Hardware RAID", "HBA" or "Tri-Mode". An HBA isn't a RAID controller just because it connects drives. Use null when neither the document nor the exact model establishes the type.
+- "mpn" and "model" are the controller manufacturer's codes, never the vendor's, which goes in "vendor_product_id". "model" is the commercial designation, such as MegaRAID 9560-16i, and "product_family" the series, such as MegaRAID.
+- "host_interface" is the connection to the server, such as PCIe 4.0 x8, never the drive interface. Keep "internal_ports" and "external_ports" apart, each as the count and connector written, such as "2 x SFF-8654 x8". Never add them together or count the drives as ports.
+- "raid_levels" are the levels the controller supports. A RAID level set up for the server's drives, such as "RAID 1 for the boot drives", isn't a property: put it in the controller's "note" as written.
+- "cache_capacity_gb" is the controller's own cache in GB, never system memory, with the quote's wording in "as_written". "cache_protection" is a mechanism, such as CacheVault, flash-backed cache or battery backup, never ordinary cache.
+- Add a "review_flags" entry when more than one controller could match, or when the document contradicts itself.
+- Record a part as a "dpu" only when the document calls it a DPU. A SmartNIC or a network adapter with offloads stays a "nic".
+- For a DPU, fill only the properties in "dpu", in the same {"value", "basis"} form as for a CPU. When the manufacturer and model identify the DPU precisely, infer the identity, network technology, ports, host interface and form factor, and give the "reason". Record processor architecture, CPU cores, onboard memory, hardware acceleration and storage connectivity only as written. Never infer "crypto": record it only as written, such as "Crypto Enable" or "NoCrypto".
+- "mpn" and "model" are the DPU manufacturer's codes, never the vendor's, which goes in "vendor_product_id". "model" includes the generation and variant, such as BlueField-2 MBF2M516A.
+- A DPU's network ports are part of it: give them in its "port_count", "port_speed_gbps" and "port_connector" as for a network adapter, such as "2x 100GbE" for 2 ports at 100, and never record them as a separate network adapter.
+- "cpu_cores" and "processor_architecture" are the DPU's own cores, never the server's CPUs. "onboard_memory_gb" is the DPU's own memory, with the quote's wording, such as "32GB DDR5", in "as_written".
+- Add a "review_flags" entry when more than one DPU could match, when a value depends on a variant the model name doesn't settle, or when the document contradicts itself.
 """
 
 

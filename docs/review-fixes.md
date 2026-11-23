@@ -87,6 +87,45 @@ NVIDIA's firmware documentation lists both for each card. The quote gives only t
 
 ---
 
+## DPUs
+
+### The generation is put in the family
+
+**What happens.** [09-dpu.md](03-component-library/09-dpu.md) keeps the generation in the model: family "BlueField", model "BlueField-3 DPU". The model puts it in the family instead and keeps only the variant as the model. It did this on both the invented DPU quote and the redacted quote (2026-11-23).
+
+**Example.**
+
+```
+  - 1x Examplecorp DX-3 D3240 DPU, 2x 200GbE QSFP112, PCIe 5.0 x16, Crypto Disabled
+```
+
+The model gives: family "DX-3", model "D3240".
+Expected: family "DX", model "DX-3 D3240".
+
+**What the code does.** Nothing. A prompt change was avoided: the last DPU wording change made the spreadsheet's vendor product IDs disappear.
+
+**What the reviewer does.** Moves the generation from the family into the model.
+
+**What the review screen should offer.** The family and model side by side, next to the line's own wording, so the split is easy to correct.
+
+### Manufacturer marked stated when it was inferred
+
+**What happens.** On the redacted quote the model marked the DPU's manufacturer as stated, with the reason that the product is that manufacturer's. The quote doesn't name the manufacturer, so the value is inferred.
+
+**What the code does.** Nothing.
+
+**What the reviewer does.** Treats the value as inferred: checks it before accepting it.
+
+### Crypto variant shortened
+
+**What happens.** The model gave the crypto variant "Disabled" for "Crypto Disabled". The spec keeps it exactly as written.
+
+**What the code does.** When the document writes "Crypto" followed by the model's value, the written form is taken, with any line break inside it joined. A value already as written, such as "Crypto Enable" or "NoCrypto", is kept.
+
+**What the reviewer does.** Corrects a variant written in other words, such as "with crypto".
+
+---
+
 ## All parts
 
 ### Vendor codes in a SKU or Part Number column

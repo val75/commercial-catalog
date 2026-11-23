@@ -22,6 +22,7 @@ Each component type has its own specification file defining the properties to be
 | 06-power-supply.md    | Power supply     |
 | 07-chassis.md         | Chassis          |
 | 08-raid-controller.md | RAID controller  |
+| 09-dpu.md             | DPU              |
 
 Additional component types can be introduced as needed.
 

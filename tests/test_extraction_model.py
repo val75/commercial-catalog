@@ -18,16 +18,19 @@ from extraction.client import extract_quotes
 from extraction.schema import (
     Basis,
     CpuComponent,
+    DpuComponent,
     GpuComponent,
     MemoryComponent,
     NicComponent,
     PsuComponent,
     QuantityBasis,
+    RaidControllerComponent,
     StorageComponent,
 )
 from ingestion.dispatch import ingest_text
 from validation.quantity import (
     cpus_per_server,
+    dpus_per_server,
     gpus_per_server,
     modules_per_server,
     nics_per_server,
@@ -344,6 +347,11 @@ def test_only_parts_with_a_spec_file_are_extracted(drafts):
                 ), component
 
 
+def test_a_boot_drive_described_as_boss_isnt_a_controller(drafts):
+    # "2x 480GB SATA SSD (BOSS boot)" names no controller of its own (08-raid-controller.md section 1).
+    assert not [c for d in drafts.values() for i in d.items for c in i.components if isinstance(c, RaidControllerComponent)]
+
+
 @pytest.mark.parametrize("quote, height", [("DF-Q-88214", "1U"), ("DF-Q-88215", "1U")])
 def test_a_server_quoted_as_one_model_gets_its_chassis_from_the_line(drafts, quote, height):
     # "Dell PowerEdge R660 (1U)": no separate chassis part, so the chassis comes from the item's line.
@@ -472,3 +480,143 @@ def test_a_spreadsheets_sku_column_is_the_vendor_product_id(psu_sheet):
     # See docs/review-fixes.md, 'Vendor codes in a SKU or Part Number column'.
     assert _stated(_only(psu_sheet, PsuComponent).psu.vendor_product_id) == "450-XXDD"
     assert _stated(_only(psu_sheet, MemoryComponent).memory.vendor_product_id) == "370-XXCC"
+
+
+# A storage server with a hardware RAID controller, an HBA and onboard RAID.
+# Invented: the maker, models and prices are made up.
+RAID_EMAIL = """\
+From: Sales <sales@example.com>
+Sent: Wednesday, August 12, 2026 10:04 AM
+Subject: Quote SQ-7731
+
+Hi,
+
+Please find our quote SQ-7731 below.
+
+Qty 3 x Example SR-450 2U storage server - USD 21,400.00 each
+  - 2x Intel Xeon Silver 4510
+  - 16x 32GB DDR5-5600 RDIMM
+  - 1x Examplecorp XR-8200-8i RAID controller, PCIe 4.0 x8, 8GB cache, flash-backed cache protection, RAID 0/1/5/6/10/50/60
+  - 1x Examplecorp XH-8300-16e HBA, PCIe 4.0 x8, 4 x SFF-8644 external ports
+  - 8x 7.68TB SAS SSD, configured as RAID 6
+  - Onboard chipset SATA RAID
+
+Regards,
+Sales
+"""
+
+_RAID_RESULT: dict = {}
+
+
+@pytest.fixture(scope="module")
+def raid_item():
+    if not _RAID_RESULT:
+        try:
+            [draft] = extract_quotes(ingest_text(RAID_EMAIL).markdown)
+            [_RAID_RESULT["item"]] = draft.items
+        except Exception as error:
+            _RAID_RESULT["error"] = error
+    if "error" in _RAID_RESULT:
+        raise _RAID_RESULT["error"]
+    return _RAID_RESULT["item"]
+
+
+def _controller(item, model):
+    [controller] = [
+        c.raid_controller
+        for c in item.components
+        if isinstance(c, RaidControllerComponent) and model in (c.raid_controller.model.value if c.raid_controller.model else "")
+    ]
+    return controller
+
+
+def test_a_raid_controller_and_an_hba_are_both_controllers_and_onboard_raid_isnt(raid_item):
+    # 08-raid-controller.md section 1: dedicated cards only; RAID built into the motherboard is configuration.
+    controllers = [c for c in raid_item.components if isinstance(c, RaidControllerComponent)]
+    assert len(controllers) == 2
+    assert {(c.quantity, c.quantity_basis) for c in controllers} == {(1, QuantityBasis.PER_UNIT)}
+
+
+def test_the_controller_types_are_told_apart(raid_item):
+    # Either stated or inferred from the line: the value is what's checked.
+    assert _controller(raid_item, "XR-8200-8i").controller_type.value == "Hardware RAID"
+    assert _controller(raid_item, "XH-8300-16e").controller_type.value == "HBA"
+
+
+def test_a_raid_controllers_cache_and_levels_are_read(raid_item):
+    controller = _controller(raid_item, "XR-8200-8i")
+    assert _stated(controller.cache_capacity_gb) == 8
+    assert "flash" in _stated(controller.cache_protection).lower()
+    assert "50" in _stated(controller.raid_levels)  # the supported levels, not "RAID 6" set up for the drives
+    assert _stated(controller.host_interface) == "PCIe 4.0 x8"
+
+
+def test_an_hbas_external_ports_are_read_and_nothing_is_guessed(raid_item):
+    hba = _controller(raid_item, "XH-8300-16e")
+    assert "SFF-8644" in _stated(hba.external_ports)
+    # Not written for the HBA, so empty: no RAID levels, cache, internal ports or drive count.
+    assert (hba.raid_levels, hba.cache_capacity_gb, hba.internal_ports, hba.max_drive_count) == (None, None, None, None)
+
+
+
+# A server with a DPU and a SmartNIC. Invented: the maker, models and prices are made up.
+DPU_EMAIL = """\
+From: Sales <sales@example.com>
+Sent: Thursday, September 3, 2026 2:15 PM
+Subject: Quote NX-2290
+
+Hi,
+
+Our quote NX-2290 is below.
+
+Qty 2 x Example SR-610 1U server - USD 18,900.00 each
+  - 2x AMD EPYC 9355
+  - 12x 64GB DDR5-6400 RDIMM
+  - 1x Examplecorp DX-3 D3240 DPU, 2x 200GbE QSFP112, PCIe 5.0 x16, 16 Arm cores, 32GB DDR5 onboard, Crypto Disabled
+  - 1x Examplecorp SN-200 SmartNIC, 2x 25GbE SFP28, PCIe 4.0 x8
+
+Regards,
+Sales
+"""
+
+_DPU_RESULT: dict = {}
+
+
+@pytest.fixture(scope="module")
+def dpu_item():
+    if not _DPU_RESULT:
+        try:
+            [draft] = extract_quotes(ingest_text(DPU_EMAIL).markdown)
+            [_DPU_RESULT["item"]] = draft.items
+        except Exception as error:
+            _DPU_RESULT["error"] = error
+    if "error" in _DPU_RESULT:
+        raise _DPU_RESULT["error"]
+    return _DPU_RESULT["item"]
+
+
+def test_a_dpu_is_its_own_part_and_a_smartnic_stays_a_network_adapter(dpu_item):
+    # 09-dpu.md rule 14, and section 5: the DPU's own ports are never a separate network adapter.
+    dpu = _only_in(dpu_item, DpuComponent)
+    # Family and model together: the model puts the generation in the family, which the
+    # reviewer moves (docs/review-fixes.md, "The generation is put in the family").
+    designation = " ".join(p.value for p in (dpu.dpu.product_family, dpu.dpu.model) if p is not None)
+    assert "DX-3" in designation and "D3240" in designation
+    adapter = _only_in(dpu_item, NicComponent)
+    assert _stated(adapter.nic.port_speed_gbps) == 25
+    assert dpus_per_server(dpu_item).per_server == 1
+
+
+def test_a_dpus_ports_and_host_interface_are_read(dpu_item):
+    dpu = _only_in(dpu_item, DpuComponent).dpu
+    assert (_stated(dpu.port_count), _stated(dpu.port_speed_gbps)) == (2, 200)
+    assert _stated(dpu.port_connector) == "QSFP112"
+    assert _stated(dpu.host_interface) == "PCIe 5.0 x16"
+
+
+def test_a_dpus_cores_memory_and_crypto_are_read_as_written(dpu_item):
+    dpu = _only_in(dpu_item, DpuComponent).dpu
+    assert (_stated(dpu.cpu_cores), _stated(dpu.onboard_memory_gb)) == (16, 32)
+    assert _stated(dpu.crypto) == "Crypto Disabled"
+    # Not written, so empty (09-dpu.md rule 9).
+    assert dpu.storage_connectivity is None

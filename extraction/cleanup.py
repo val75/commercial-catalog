@@ -8,6 +8,9 @@
   the file-name flag only with a quote number.
 - Quotes: a draft with nothing in it is dropped. The model once added an
   all-null quote after a spreadsheet's real one.
+- Items: an item with nothing in it is dropped: no parts, chassis, price or
+  codes, and no letter or digit in its description. After a server with a DPU,
+  the model added an item "," with quantity 1 in 3 runs of 3 (2026-11-23).
 - Quotes: a revision the document doesn't contain is dropped, with a review
   flag. The model numbered quotes "1" in an email that gives no revision.
 - Vendor product IDs: in a spreadsheet with a plain "Product ID" column and a
@@ -15,7 +18,9 @@
   (decision log D-001, D-005). The model kept taking the plain one, whatever
   the instructions said, so its value is swapped for the same row's named one.
 - Vendor product IDs: in a PDF list "CODE(x4)MPN ...", CODE is the vendor's.
-  When the model gave the MPN but no vendor product ID, CODE is taken.
+  When the model gave the MPN but no vendor product ID, CODE is taken. Without
+  an MPN, the part's family and model right after the count find it instead
+  ("CODE(x4)<family> <model> ...", a DPU line, approved 2026-11-23).
 - Network adapters: the crypto variant is kept only as written, never inferred
   (05-network-adapter.md rule 20).
 - Network adapters: "IB/EN", "EN/IB" or VPI written on the adapter's own part
@@ -37,6 +42,22 @@
   (07-chassis.md 3.4). Inferred dimensions, drive bays, expansion slots, power
   supply bays and cooling are dropped: section 5.1 has them filled from
   manufacturer documentation, and the model's memory isn't that.
+- DPUs: the model may infer the identity and the network side (technology,
+  ports, host interface, form factor), as for network adapters (decided
+  2026-11-23). Inferred processor architecture, CPU cores, onboard memory,
+  hardware acceleration and storage connectivity are dropped: 09-dpu.md wants
+  them for the exact model, never carried across generations (rules 4, 9 and
+  11). The crypto variant is kept only as written, and "IB/EN" or VPI read as
+  for adapters. A shortened crypto variant gets the document's wording back:
+  the model gave "Disabled" for "Crypto Disabled". A model that repeats the MPN
+  is cleared. The generation the model puts in the family rather than the model
+  is left for the reviewer (docs/review-fixes.md).
+- RAID controllers (HBAs and tri-mode cards too): the model may infer only the
+  identity, controller type and host interface (decided 2026-11-23). Inferred
+  ports, drive interfaces, maximum drive count, RAID levels, cache, cache
+  protection and boot support are dropped: 08-raid-controller.md has them from
+  the quote or documentation for the exact model, never guessed from the family
+  or the connector (rules 6, 7 and 10). A model that repeats the MPN is cleared.
 - Drives: an MPN found only inside the vendor's code ("HDS-XYZ-<MPN>"), never on
   its own, is marked inferred and flagged as possibly shortened (03-storage.md
   decision). The model marked such MPNs as stated. A model equal to it goes too.
@@ -55,12 +76,16 @@ from extraction.schema import (
     ItemChassis,
     CpuComponent,
     CpuProperties,
+    DpuComponent,
+    DpuProperties,
     NicComponent,
     NicProperties,
     Property,
     PsuComponent,
     PsuProperties,
     QuoteDraft,
+    RaidControllerComponent,
+    RaidControllerProperties,
     StorageComponent,
 )
 
@@ -69,6 +94,28 @@ CPU_IDENTITY = {"manufacturer", "product_family", "model"}
 PSU_ONLY_AS_WRITTEN = ("ac_input_phase", "input_connector")
 # Taken from the quote only; manufacturer documentation fills them later (07-chassis.md 5.1).
 CHASSIS_ONLY_AS_WRITTEN = ("dimensions", "drive_bays", "expansion_slots", "psu_bays", "cooling")
+# Everything but identity and the network side (decided 2026-11-23; 09-dpu.md rules 4, 9 and 11).
+# The crypto variant is never inferred, as for network adapters.
+DPU_ONLY_AS_WRITTEN = (
+    "processor_architecture",
+    "cpu_cores",
+    "onboard_memory_gb",
+    "hardware_acceleration",
+    "storage_connectivity",
+    "crypto",
+)
+# Everything but identity, controller type and host interface (decided 2026-11-23; 08-raid-controller.md
+# rules 6, 7 and 10, and section 2's notes on drive count and boot support).
+RAID_CONTROLLER_ONLY_AS_WRITTEN = (
+    "external_ports",
+    "internal_ports",
+    "supported_drive_interfaces",
+    "max_drive_count",
+    "raid_levels",
+    "cache_capacity_gb",
+    "cache_protection",
+    "boot_support",
+)
 # "2U DP RACK SERVER", "(1U)"; not inside a code such as SYS-2U-X400.
 _RACK_HEIGHT = re.compile(r"(?<![A-Za-z0-9-])(\d{1,2}U)(?![A-Za-z0-9-])")
 # "CHASSIS CX-210": a code with a digit after the label.
@@ -105,6 +152,7 @@ def clean_drafts(drafts: list[QuoteDraft], document: str | None = None) -> list[
     """
     cleaned = [draft.model_copy(deep=True) for draft in drafts if draft != QuoteDraft()]
     for draft in cleaned:
+        draft.items = [item for item in draft.items if not _is_an_empty_item(item)]
         if document is not None:
             _drop_revision_not_in(document, draft)
         _drop_flags_that_dont_fit(draft, document)
@@ -130,9 +178,18 @@ def clean_drafts(drafts: list[QuoteDraft], document: str | None = None) -> list[
                     if document is not None:
                         _read_ib_en_as_both_technologies(component.nic, document)
                     _clear_a_model_that_repeats_the_mpn(component.nic)
+                elif isinstance(component, DpuComponent):
+                    if document is not None:
+                        _read_ib_en_as_both_technologies(component.dpu, document)
+                        _restore_the_written_crypto_wording(component.dpu, document)
+                    _clear_a_model_that_repeats_the_mpn(component.dpu)
+                    _drop_inferred(component.dpu, DPU_ONLY_AS_WRITTEN)
                 elif isinstance(component, PsuComponent):
                     _clear_a_model_that_repeats_the_mpn(component.psu)
                     _drop_inferred(component.psu, PSU_ONLY_AS_WRITTEN)
+                elif isinstance(component, RaidControllerComponent):
+                    _clear_a_model_that_repeats_the_mpn(component.raid_controller)
+                    _drop_inferred(component.raid_controller, RAID_CONTROLLER_ONLY_AS_WRITTEN)
                 elif isinstance(component, StorageComponent):
                     _move_connector_out_of_form_factor(component)
                     if document is not None:
@@ -188,14 +245,20 @@ def _take_the_vendor_code_in_front_of_the_count(properties, document: str) -> No
     fields = type(properties).model_fields if properties is not None else {}
     if "vendor_product_id" not in fields or "mpn" not in fields:
         return
-    if properties.vendor_product_id is not None or properties.mpn is None:
+    if properties.vendor_product_id is not None:
         return
-    pattern = rf"(?<![A-Za-z0-9-])([A-Za-z0-9][A-Za-z0-9-]*)\(x\s*\d+\)\s*{re.escape(properties.mpn.value.strip())}"
-    found = re.search(pattern, document)
+    if properties.mpn is not None:
+        after_the_count = re.escape(properties.mpn.value.strip())
+    elif getattr(properties, "model", None) is not None:
+        # No MPN: "CODE(x4)<family> <model> ...", the part's own designation right after the count.
+        family = getattr(properties, "product_family", None)
+        words = [part.value for part in (family, properties.model) if part is not None]
+        after_the_count = r"\s+".join(re.escape(word.strip()) for word in words)
+    else:
+        return
+    found = re.search(rf"(?<![A-Za-z0-9-])([A-Za-z0-9][A-Za-z0-9-]*)\(x\s*\d+\)\s*{after_the_count}", document)
     if found:
-        properties.vendor_product_id = properties.mpn.model_copy(
-            update={"value": found.group(1), "basis": Basis.STATED, "reason": None}
-        )
+        properties.vendor_product_id = Property[str](value=found.group(1), basis=Basis.STATED)
 
 
 def _part_texts(document: str) -> list[str]:
@@ -215,7 +278,7 @@ def _part_texts(document: str) -> list[str]:
     return pieces
 
 
-def _read_ib_en_as_both_technologies(adapter: NicProperties, document: str) -> None:
+def _read_ib_en_as_both_technologies(adapter: NicProperties | DpuProperties, document: str) -> None:
     # "IB/EN" (or VPI) is an adapter that runs Ethernet and InfiniBand, but the model
     # read "NDR400G IB/EN" as "InfiniBand NDR" on both the PDF and the spreadsheet.
     if adapter.network_technology is not None and adapter.network_technology.value == BOTH_TECHNOLOGIES:
@@ -234,6 +297,31 @@ def _read_ib_en_as_both_technologies(adapter: NicProperties, document: str) -> N
                 value=BOTH_TECHNOLOGIES, basis=Basis.STATED, reason=f"The document says {written.group(0)}."
             )
             return
+
+
+def _restore_the_written_crypto_wording(part, document: str) -> None:
+    # The model gave "Disabled" for "Crypto Disabled" (2026-11-23). The written form, with a
+    # line break inside it joined, is the variant as written.
+    if part.crypto is None:
+        return
+    found = re.search(rf"(?<![A-Za-z0-9])Crypto\s+{re.escape(part.crypto.value.strip())}(?![A-Za-z0-9])", document)
+    if found:
+        part.crypto = part.crypto.model_copy(update={"value": " ".join(found.group(0).split())})
+
+
+def _is_an_empty_item(item) -> bool:
+    # Nothing but a quantity and a description without a letter or digit, such as ",".
+    holds_something = (
+        item.components
+        or item.chassis is not None
+        or item.unit_price is not None
+        or item.extended_price is not None
+        or item.part_number
+        or item.manufacturer
+        or item.model
+        or re.search(r"[A-Za-z0-9]", item.description)
+    )
+    return not holds_something
 
 
 def _read_the_chassis_from_the_items_line(item) -> None:
@@ -256,7 +344,9 @@ def _drop_inferred(part, names: tuple[str, ...]) -> None:
             setattr(part, name, None)
 
 
-def _clear_a_model_that_repeats_the_mpn(part: NicProperties | PsuProperties | ChassisProperties) -> None:
+def _clear_a_model_that_repeats_the_mpn(
+    part: NicProperties | DpuProperties | PsuProperties | ChassisProperties | RaidControllerProperties,
+) -> None:
     # Adapters: NVIDIA cards carry a SKU (the 900-... code quotes write) and an order
     # number, the OPN (MCX...). The model put the SKU in both fields; the OPN is the
     # model, and the quote doesn't give it, so the reviewer fills it in.

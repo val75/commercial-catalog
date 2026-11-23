@@ -1,5 +1,5 @@
-"""Works out "Quantity installed": identical parts per server, for CPUs, memory, GPUs, drives, network adapters
-and power supplies.
+"""Works out "Quantity installed": identical parts per server, for CPUs, memory, GPUs, drives, network adapters,
+DPUs, power supplies and RAID controllers.
 
 The component spec files store counts per server, but quotes state them either
 per server ("2x CPU") or across the whole order ("(x8)" under 4 servers). The
@@ -22,12 +22,14 @@ from typing import Any
 
 from extraction.schema import (
     CpuComponent,
+    DpuComponent,
     GpuComponent,
     MemoryComponent,
     NicComponent,
     PsuComponent,
     QuantityBasis,
     QuoteItem,
+    RaidControllerComponent,
     StorageComponent,
 )
 from validation.flags import Flag
@@ -106,6 +108,34 @@ PSU = _Kind(
     "power supplies",
     identity=lambda line: _values(line.psu, ("mpn", "model", "vendor_product_id", "rated_output_w")),
 )
+
+
+DPU = _Kind(
+    DpuComponent,
+    "DPU",
+    "DPUs",
+    # The crypto variant too: crypto-enabled and disabled cards are different parts.
+    identity=lambda line: _values(line.dpu, ("mpn", "model", "vendor_product_id", "crypto")),
+)
+
+
+def dpus_per_server(item: QuoteItem) -> QuantityCheck | None:
+    """The DPUs per server for one quote item, or None if it has no DPU line."""
+    return quantity_installed(item, DPU)
+
+
+RAID_CONTROLLER = _Kind(
+    RaidControllerComponent,
+    "RAID controller",
+    "RAID controllers",
+    # The type too: a RAID controller and an HBA in one server are two roles, never added up.
+    identity=lambda line: _values(line.raid_controller, ("mpn", "model", "vendor_product_id", "controller_type")),
+)
+
+
+def raid_controllers_per_server(item: QuoteItem) -> QuantityCheck | None:
+    """The RAID controllers, HBAs and tri-mode cards per server for one quote item, or None if it has none."""
+    return quantity_installed(item, RAID_CONTROLLER)
 
 
 def psus_per_server(item: QuoteItem) -> QuantityCheck | None:

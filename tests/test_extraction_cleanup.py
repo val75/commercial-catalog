@@ -458,6 +458,26 @@ def test_a_draft_with_anything_in_it_is_kept():
         assert len(clean_drafts([QuoteDraft.model_validate(fields)])) == 1
 
 
+def test_an_item_with_nothing_in_it_is_dropped():
+    # After a server with a DPU, the model added an item "," with quantity 1 and no parts,
+    # 3 runs of 3 (2026-11-23).
+    server = {"description": "Example SR-610 1U server", "quantity": 2, "unit_price": 18900}
+    draft = QuoteDraft.model_validate({"quote_number": "Q-1", "items": [server, {"description": ",", "quantity": 1}]})
+    [cleaned] = clean_drafts([draft])
+    assert [item.description for item in cleaned.items] == ["Example SR-610 1U server"]
+
+
+def test_an_item_with_any_text_price_code_or_part_is_kept():
+    for fields in (
+        {"description": "Assembly fee"},
+        {"description": ",", "unit_price": 120},
+        {"description": ",", "part_number": "FEE-01"},
+        {"description": "-", "components": [{"component_type": "cpu"}]},
+    ):
+        draft = QuoteDraft.model_validate({"quote_number": "Q-1", "items": [fields]})
+        assert len(clean_drafts([draft])[0].items) == 1, fields
+
+
 def test_cleaning_leaves_the_original_drafts_unchanged():
     draft = _draft(_drive(form_factor=_stated("U.2")))
     clean_drafts([draft])
@@ -564,3 +584,162 @@ def test_a_code_containing_a_height_isnt_read_as_one():
 def test_an_empty_chassis_is_dropped():
     # The model sometimes returned a chassis with every property null.
     assert _item_after_cleanup("4x Example 1.92TB SSD", {}).chassis is None
+
+
+# --- RAID controllers (08-raid-controller.md) -----------------------------------------------
+
+
+def _controller_after_cleanup(properties: dict, document: str | None = None):
+    draft = _draft({"component_type": "raid_controller", "raid_controller": properties})
+    return _only_component(clean_drafts([draft], document=document)[0]).raid_controller
+
+
+def test_a_raid_controllers_inferred_capabilities_are_dropped():
+    # Only identity, controller type and host interface may be inferred (decided 2026-11-23):
+    # rules 6, 7 and 10 warn against guessing ports, drive interfaces and RAID levels.
+    controller = _controller_after_cleanup(
+        {
+            "external_ports": _inferred("0"),
+            "internal_ports": _inferred("2 x SFF-8654 x8"),
+            "supported_drive_interfaces": _inferred("SAS, SATA, NVMe"),
+            "max_drive_count": _inferred(240),
+            "raid_levels": _inferred("RAID 0, 1, 5, 6, 10, 50, 60"),
+            "cache_capacity_gb": {**_inferred(8), "as_written": None},
+            "cache_protection": _inferred("CacheVault"),
+            "boot_support": _inferred(True),
+        }
+    )
+    assert controller == type(controller)()
+
+
+def test_a_raid_controllers_inferred_identity_type_and_host_interface_stay():
+    controller = _controller_after_cleanup(
+        {
+            "manufacturer": _inferred("Example"),
+            "product_family": _inferred("ExampleRAID"),
+            "controller_type": _inferred("Tri-Mode"),
+            "host_interface": _inferred("PCIe 4.0 x8"),
+        }
+    )
+    assert [p.value for p in (controller.manufacturer, controller.product_family, controller.controller_type, controller.host_interface)] == [
+        "Example",
+        "ExampleRAID",
+        "Tri-Mode",
+        "PCIe 4.0 x8",
+    ]
+
+
+def test_a_raid_controllers_stated_capabilities_are_kept():
+    controller = _controller_after_cleanup(
+        {"raid_levels": _stated("RAID 0, 1, 10"), "internal_ports": _stated("16 x SAS/SATA"), "boot_support": _stated(True)}
+    )
+    assert (controller.raid_levels.value, controller.internal_ports.value, controller.boot_support.value) == (
+        "RAID 0, 1, 10",
+        "16 x SAS/SATA",
+        True,
+    )
+
+
+def test_a_raid_controller_model_equal_to_its_mpn_is_cleared():
+    # Rule 2: the model, the family and the codes are kept apart.
+    controller = _controller_after_cleanup({"mpn": _stated("05-10000-00"), "model": _stated("05-10000-00")})
+    assert (controller.model, controller.mpn.value) == (None, "05-10000-00")
+
+
+def test_a_raid_controllers_vendor_code_in_front_of_the_count_is_taken():
+    document = "2 XS-2200-BASE-A, 2U DP RACK SERVER 48,500.00 97,000.00\nRC-16I-TM(x2)05-10000-00 Tri-Mode 16i\n"
+    controller = _controller_after_cleanup({"mpn": _stated("05-10000-00")}, document=document)
+    assert controller.vendor_product_id.value == "RC-16I-TM"
+
+
+# --- DPUs (09-dpu.md) -------------------------------------------------------------------------
+
+
+def _dpu_after_cleanup(properties: dict, document: str | None = None):
+    draft = _draft({"component_type": "dpu", "dpu": properties})
+    return _only_component(clean_drafts([draft], document=document)[0]).dpu
+
+
+def test_a_dpus_inferred_compute_memory_and_offloads_are_dropped():
+    # Identity and the network side may be inferred (decided 2026-11-23); rules 4, 9 and 11
+    # keep the rest to the quote or documentation for the exact model. Crypto never, as for NICs.
+    dpu = _dpu_after_cleanup(
+        {
+            "processor_architecture": _inferred("Arm Cortex-A78"),
+            "cpu_cores": _inferred(16),
+            "onboard_memory_gb": {**_inferred(32), "as_written": None},
+            "hardware_acceleration": _inferred("Crypto, compression"),
+            "storage_connectivity": _inferred("NVMe-oF"),
+            "crypto": _inferred("Crypto Enable"),
+        }
+    )
+    assert dpu == type(dpu)()
+
+
+def test_a_dpus_inferred_identity_and_network_side_stay():
+    dpu = _dpu_after_cleanup(
+        {
+            "manufacturer": _inferred("Example"),
+            "network_technology": _inferred("Ethernet"),
+            "port_connector": _inferred("QSFP112"),
+            "host_interface": _inferred("PCIe 5.0 x16"),
+            "form_factor": _inferred("PCIe full-height"),
+        }
+    )
+    assert [p.value for p in (dpu.manufacturer, dpu.network_technology, dpu.port_connector, dpu.host_interface, dpu.form_factor)] == [
+        "Example",
+        "Ethernet",
+        "QSFP112",
+        "PCIe 5.0 x16",
+        "PCIe full-height",
+    ]
+
+
+def test_a_dpus_stated_values_are_kept():
+    dpu = _dpu_after_cleanup({"cpu_cores": _stated(16), "crypto": _stated("Crypto Enable")})
+    assert (dpu.cpu_cores.value, dpu.crypto.value) == (16, "Crypto Enable")
+
+
+def test_a_dpu_model_equal_to_its_mpn_is_cleared():
+    dpu = _dpu_after_cleanup({"mpn": _stated("900-9D000-0000-AA0"), "model": _stated("900-9D000-0000-AA0")})
+    assert (dpu.model, dpu.mpn.value) == (None, "900-9D000-0000-AA0")
+
+
+def test_a_dpu_written_ib_en_is_both_technologies():
+    document = "DPU-DX3-2P(x4)900-9D000-0000-AA0 DX-3 DPU 2x200G IB/EN QSFP112 Crypto Enable\n"
+    dpu = _dpu_after_cleanup(
+        {"mpn": _stated("900-9D000-0000-AA0"), "network_technology": _stated("InfiniBand")}, document=document
+    )
+    assert dpu.network_technology.value == "Ethernet and InfiniBand"
+    assert dpu.vendor_product_id.value == "DPU-DX3-2P"
+
+
+def test_a_shortened_crypto_variant_gets_its_written_wording_back():
+    # The model gave "Disabled" for "Crypto Disabled" (2026-11-23); the variant is kept as written.
+    document = "  - 1x Examplecorp DX-3 D3240 DPU, 2x 200GbE QSFP112, Crypto Disabled\n"
+    assert _dpu_after_cleanup({"crypto": _stated("Disabled")}, document=document).crypto.value == "Crypto Disabled"
+
+
+def test_crypto_wording_across_a_line_break_is_joined():
+    document = "DPU-DX3-2P(x4)DX-3 D3220\nDPU 200GbE dual port Crypto\nEnable\n"
+    assert _dpu_after_cleanup({"crypto": _stated("Enable")}, document=document).crypto.value == "Crypto Enable"
+
+
+def test_a_crypto_variant_given_as_written_is_kept():
+    document = "DX-3 D3220 Crypto Enable\nNIC 900-9X000 NoCrypto\n"
+    assert _dpu_after_cleanup({"crypto": _stated("Crypto Enable")}, document=document).crypto.value == "Crypto Enable"
+    draft = _draft({"component_type": "nic", "nic": {"crypto": _stated("NoCrypto")}})
+    assert _only_component(clean_drafts([draft], document=document)[0]).nic.crypto.value == "NoCrypto"
+
+
+def test_without_an_mpn_the_vendor_code_is_found_in_front_of_the_family_and_model():
+    # "CODE(x4)<family> <model> ...": no MPN to anchor on, so the part's own designation is used.
+    document = "DPU-DX3-2P(x4)DX-3 D3220\nDPU 200GbE dual port Crypto Enable\n"
+    dpu = _dpu_after_cleanup({"product_family": _stated("DX-3"), "model": _stated("D3220")}, document=document)
+    assert (dpu.vendor_product_id.value, dpu.vendor_product_id.basis) == ("DPU-DX3-2P", "stated")
+
+
+def test_a_model_found_elsewhere_than_after_the_count_takes_no_code():
+    document = "DPU-DX3-2P(x4)900-9D000-0000-AA0 DX-3 D3220 DPU\n"
+    dpu = _dpu_after_cleanup({"product_family": _stated("DX-3"), "model": _stated("D3220")}, document=document)
+    assert dpu.vendor_product_id is None

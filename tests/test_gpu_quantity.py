@@ -32,13 +32,13 @@ def test_any_whole_count_of_gpus_per_server_passes(per_server):
 
 
 def test_a_dpu_line_is_not_counted_as_a_gpu():
-    dpu = {"component_type": "other", "raw_text": "4x Example DPU 200GbE dual port"}
+    dpu = {"component_type": "dpu", "quantity": 4, "dpu": {"model": {"value": "Example DPU 200GbE", "basis": "stated"}}}
     check = gpus_per_server(_server(dpu, _gpu_line(quantity=8, basis="per_unit")))
     assert (check.per_server, check.flags) == (8, [])
 
 
 def test_an_item_without_a_gpu_line_has_nothing_to_check():
-    dpu = {"component_type": "other", "raw_text": "4x Example DPU 200GbE dual port"}
+    dpu = {"component_type": "dpu", "quantity": 4, "dpu": {"model": {"value": "Example DPU 200GbE", "basis": "stated"}}}
     assert gpus_per_server(_server(dpu)) is None
 
 
