@@ -1,4 +1,5 @@
-# Runtime dependencies for the ingestion layer
+# Runtime dependencies for the ingestion and extraction layers
 pdfplumber>=0.11
 openpyxl>=3.1
 ftfy>=6.2          # optional at runtime (text adapter falls back without it), but much better mojibake repair
+pydantic>=2.6      # quote draft schema

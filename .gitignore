@@ -15,3 +15,10 @@ venv/
 
 # Local config / secrets (model endpoint URLs, DB passwords later)
 .env
+
+# Confidential quotes and the names to redact from them
+private/
+# Redacted copies, released here by hand after review
+redacted/
+# Docling tryout output (may hold converted private quotes)
+sandbox/docling/out/

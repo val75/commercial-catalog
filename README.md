@@ -45,7 +45,7 @@ doc.meta           # page_count / sheet_names / original_sha256 / ...
 ## Run it
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements-dev.txt
 python make_fixtures.py   # builds the binary sample files
 python demo.py            # ingests each fixture, prints the Markdown

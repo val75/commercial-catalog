@@ -1,0 +1,6 @@
+# Docling tryout environment. Kept out of the main venv because docling pulls
+# in torch and layout/table models.
+docling>=2.0
+# The project's own runtime deps, so convert.py can run the current pdfplumber
+# adapter side by side for comparison.
+-r ../../requirements.txt
