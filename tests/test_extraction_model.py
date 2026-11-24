@@ -28,6 +28,7 @@ from extraction.schema import (
     StorageComponent,
 )
 from ingestion.dispatch import ingest_text
+from pipeline import process_text
 from validation.quantity import (
     cpus_per_server,
     dpus_per_server,
@@ -556,6 +557,20 @@ def test_an_hbas_external_ports_are_read_and_nothing_is_guessed(raid_item):
     assert "SFF-8644" in _stated(hba.external_ports)
     # Not written for the HBA, so empty: no RAID levels, cache, internal ports or drive count.
     assert (hba.raid_levels, hba.cache_capacity_gb, hba.internal_ports, hba.max_drive_count) == (None, None, None, None)
+
+
+def test_the_pipeline_takes_a_pasted_quote_to_drafts_with_their_checks():
+    result = process_text(RAID_EMAIL, source_name="SQ-7731.txt")
+    [quote] = result.quotes
+    [item] = quote.items
+    checks = {type(review.component): review.quantity for review in item.components}
+    assert checks[CpuComponent].per_server == 2
+    assert checks[MemoryComponent].per_server == 16
+    assert checks[StorageComponent].per_server == 8
+    # A RAID controller and an HBA in one server are asked about, never added up (08-raid-controller.md section 5).
+    controllers = [review for review in item.components if isinstance(review.component, RaidControllerComponent)]
+    assert len(controllers) == 2 and controllers[0].quantity is controllers[1].quantity
+    assert controllers[0].quantity.per_server is None and controllers[0].quantity.flags
 
 
 

@@ -24,6 +24,40 @@ doc.warnings       # e.g. skipped scanned page, empty sheet
 doc.meta           # page_count / sheet_names / original_sha256 / ...
 ```
 
+## The pipeline: upload to drafts in one call
+
+`pipeline/` runs the stages in order: ingestion, then extraction (the model,
+then cleanup), then the deterministic checks in `validation/`.
+
+```python
+from pipeline import process_text, process_file
+
+result = process_file(file_bytes, "Q-1234.pdf")   # or process_text(pasted_string)
+
+result.document                # the NormalizedDoc above, with warnings and provenance
+for quote in result.quotes:    # one input can hold several quotes
+    quote.draft                # the draft, as extraction and cleanup left it
+    for item in quote.items:
+        item.flags             # chassis problems
+        for c in item.components:
+            c.quantity         # parts per server, or the question to ask
+            c.capacity         # drives only: the standard SSD size proposed
+            c.flags            # problems with this part's properties
+```
+
+- **Checks only propose.** The draft is never changed: a count per server, a
+  standard SSD size and every flag sit beside it, so review can show what the
+  quote said next to what the checks suggest.
+- **Each check sits where review shows it**: on its component line, or on the
+  item for the chassis. Several lines of one kind (a RAID controller and an HBA,
+  say) share one question rather than being added up.
+- **Failures stop at their stage.** An unsupported file type raises
+  `ValueError`, a model problem raises `ExtractionError`. An empty document,
+  such as a PDF with only scanned pages, returns no quotes without calling the
+  model; its warnings say why.
+- The model's address comes from `MODEL_BASE_URL` in the environment or `.env`
+  (see `.env.example`), or from a `settings=ModelSettings(...)` argument.
+
 ## What each adapter does
 
 - **text** — fixes encoding (mojibake) and whitespace, keeps everything else
@@ -60,6 +94,9 @@ ingestion/
   dispatch.py               ingest_text / ingest_file (+ provenance)
   adapters/
     text.py  pdf.py  spreadsheet.py
+extraction/                 draft schema, model client, cleanup
+validation/                 quantity, property and SSD-size checks
+pipeline/                   process_text / process_file: all of the above in order
 fixtures/                   sample inputs (one paste has TWO quotes)
 tests/                      pytest suite
 demo.py  make_fixtures.py
@@ -68,5 +105,4 @@ requirements.txt  requirements-dev.txt  pyproject.toml
 
 ## Not in this step (next up)
 
-Extraction: feed `doc.markdown` + the target schema to the model, get 1..N
-structured drafts back. Then persistence (Postgres) and the review UI.
+Persistence (Postgres) for approved drafts, then the review UI.

@@ -23,7 +23,8 @@ def inferred_without_reason(properties: BaseModel) -> list[Flag]:
     """Inferred values must say what they were worked out from (00-overview.md, section 4)."""
     flags = []
     for name, prop in properties:
-        if prop is not None and prop.basis is Basis.INFERRED and not (prop.reason or "").strip():
+        # Only property objects have a basis; the chassis also carries a note and review flags.
+        if getattr(prop, "basis", None) is Basis.INFERRED and not (prop.reason or "").strip():
             flags.append(
                 Flag(
                     PropertyIssue.INFERRED_WITHOUT_REASON,
