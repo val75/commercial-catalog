@@ -135,7 +135,7 @@ class ModelSettings:
 
 def load_settings(env_file: Path | str = DEFAULT_ENV_FILE) -> ModelSettings:
     """Each setting comes from the environment, otherwise from the .env file."""
-    from_file = _read_env_file(Path(env_file))
+    from_file = read_env_file(Path(env_file))
 
     def setting(name: str) -> str | None:
         return os.environ.get(name) or from_file.get(name) or None
@@ -242,7 +242,7 @@ def _require_json(content: str) -> Any:
         raise ExtractionError("The model's output wasn't valid JSON.") from None
 
 
-def _read_env_file(path: Path) -> dict[str, str]:
+def read_env_file(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
     settings = {}
