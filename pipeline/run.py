@@ -81,14 +81,15 @@ class PipelineResult:
 
 
 def process_text(raw: str, source_name: str = "pasted-text", *, settings: ModelSettings | None = None) -> PipelineResult:
-    return _process(ingest_text(raw, source_name), settings)
+    return process_document(ingest_text(raw, source_name), settings=settings)
 
 
 def process_file(data: bytes, filename: str, *, settings: ModelSettings | None = None) -> PipelineResult:
-    return _process(ingest_file(data, filename), settings)
+    return process_document(ingest_file(data, filename), settings=settings)
 
 
-def _process(document: NormalizedDoc, settings: ModelSettings | None) -> PipelineResult:
+def process_document(document: NormalizedDoc, *, settings: ModelSettings | None = None) -> PipelineResult:
+    """Extraction and checks for a document already ingested, such as one stored for review."""
     if document.is_empty:
         return PipelineResult(document, [])
     drafts = extract_quotes(document.markdown, settings=settings, source_name=document.source_name)
