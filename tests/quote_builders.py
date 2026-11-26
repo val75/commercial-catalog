@@ -110,3 +110,47 @@ def example_quote() -> QuoteDraft:
         quote_number="Q-48210",
         total=98000,
     )
+
+
+_next_sha = iter(range(1, 10**9))
+
+
+def stored_document(db, source_name: str = "Q-1.pdf", source_type: str = "pdf", received_at=None):
+    """A stored document (no original file) for the database tests."""
+    from storage.tables import Document
+
+    document = Document(
+        sha256=f"{next(_next_sha):064x}",
+        source_type=source_type,
+        source_name=source_name,
+        original_path="unused.pdf",
+        markdown="# Invented quote",
+        warnings=[],
+        meta={},
+    )
+    if received_at is not None:
+        document.received_at = received_at
+    db.add(document)
+    db.flush()
+    return document
+
+
+def stored_draft(db, draft: QuoteDraft | None = None, *, document=None, position: int = 0, **document_fields) -> int:
+    """A draft with the pipeline's checks and a review waiting, as run_import stores them. Returns the draft id."""
+    from pipeline import review_draft
+    from review.checks_json import checks_to_json
+    from storage.tables import Draft, Review
+
+    draft = draft if draft is not None else example_quote()
+    document = document if document is not None else stored_document(db, **document_fields)
+    row = Draft(
+        document_id=document.id,
+        position=position,
+        draft=draft.model_dump(mode="json"),
+        checks=checks_to_json(review_draft(draft)),
+    )
+    db.add(row)
+    db.flush()
+    db.add(Review(draft_id=row.id, status="needs_review", decisions={}))
+    db.flush()
+    return row.id
