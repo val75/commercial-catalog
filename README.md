@@ -58,6 +58,45 @@ for quote in result.quotes:    # one input can hold several quotes
 - The model's address comes from `MODEL_BASE_URL` in the environment or `.env`
   (see `.env.example`), or from a `settings=ModelSettings(...)` argument.
 
+## Review storage
+
+`storage/` keeps everything the review queue needs in PostgreSQL, and `review/`
+holds the logic on top of it: imports, decisions, approval and the queue listing.
+The draft, its checks, the reviewer's decisions and each approved quote are JSONB.
+
+Settings, from the environment or `.env` (see `.env.example`):
+
+- `DATABASE_URL`, such as `postgresql+psycopg://localhost/commercial_catalog`
+- `TEST_DATABASE_URL`: a separate database that the tests wipe on every run.
+  Without it, the database tests skip.
+- `ORIGINALS_DIR`: the folder that keeps each uploaded original, named by its SHA-256
+
+Set up once, then after each new migration:
+
+```bash
+createdb commercial_catalog
+createdb commercial_catalog_test
+alembic upgrade head      # creates or updates the tables in DATABASE_URL
+```
+
+```python
+from review import imports, actions, queue
+
+import_id = imports.import_file(session, store, file_bytes, "Q-1234.pdf")  # stored, waiting
+imports.claim_next_import(session)       # one document at a time
+imports.run_import(session, import_id)   # drafts and reviews, or a plain failure reason
+queue.list_queue(session)                # failed, reading, and the quotes to review
+actions.record_decision(session, draft_id, {"kind": "use_guess", "path": "..."}, by="me")
+actions.approve(session, draft_id, by="me")
+```
+
+- **Nothing in `review/` commits.** The caller owns the transaction. An
+  original removed with a failed import is deleted only after the commit.
+- **A guess reaches an approved quote only if the reviewer used it or typed a
+  value.** Approval is refused while a question is open.
+- **Decisions are kept apart from the draft**, so Undo restores them and
+  extraction can be re-run.
+
 ## What each adapter does
 
 - **text** — fixes encoding (mojibake) and whitespace, keeps everything else
@@ -97,12 +136,14 @@ ingestion/
 extraction/                 draft schema, model client, cleanup
 validation/                 quantity, property and SSD-size checks
 pipeline/                   process_text / process_file: all of the above in order
+storage/                    Postgres tables, Alembic migrations, the originals folder
+review/                     imports, decisions, approve / reject / undo, the queue
 fixtures/                   sample inputs (one paste has TWO quotes)
 tests/                      pytest suite
 demo.py  make_fixtures.py
-requirements.txt  requirements-dev.txt  pyproject.toml
+requirements.txt  requirements-dev.txt  pyproject.toml  alembic.ini
 ```
 
 ## Not in this step (next up)
 
-Persistence (Postgres) for approved drafts, then the review UI.
+The server API (FastAPI) on top of `review/`, then the review screens (React).
