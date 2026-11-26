@@ -175,17 +175,39 @@ _PENDING = "originals_to_delete"
 
 
 def _delete_after_commit(session: Session, store: OriginalStore, path: str) -> None:
+    """Delete the original once the removal is really committed, never when it's rolled back or abandoned.
+
+    Each pending delete remembers the transaction it was asked in. Rolling back that
+    transaction, or any around it, drops it; so does the session's transaction ending
+    without a commit (a close). Only a commit of the whole session transaction deletes.
+    """
     if _PENDING not in session.info:
         session.info[_PENDING] = []
 
         @event.listens_for(session, "after_commit")
         def _delete(committed: Session) -> None:
-            for pending_store, pending_path in committed.info.get(_PENDING, []):
+            pending, committed.info[_PENDING] = committed.info[_PENDING], []
+            for _, pending_store, pending_path in pending:
                 pending_store.delete(pending_path)
-            committed.info[_PENDING] = []
 
         @event.listens_for(session, "after_soft_rollback")
-        def _keep(rolled_back: Session, previous_transaction) -> None:
-            rolled_back.info[_PENDING] = []
+        def _drop_rolled_back(rolled_back: Session, previous_transaction) -> None:
+            rolled_back.info[_PENDING] = [
+                entry for entry in rolled_back.info[_PENDING] if not _inside(entry[0], previous_transaction)
+            ]
 
-    session.info[_PENDING].append((store, path))
+        @event.listens_for(session, "after_transaction_end")
+        def _drop_abandoned(ended: Session, transaction) -> None:
+            if transaction.parent is None:  # after_commit has run already if this was a commit
+                ended.info[_PENDING] = []
+
+    transaction = session.get_nested_transaction() or session.get_transaction()
+    session.info[_PENDING].append((transaction, store, path))
+
+
+def _inside(transaction, outer) -> bool:
+    while transaction is not None:
+        if transaction is outer:
+            return True
+        transaction = transaction.parent
+    return False

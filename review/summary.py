@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from review.apply import overrides_standard_size
 from review.decisions import open_questions
 from review.paths import inferred_paths
 
@@ -24,9 +25,7 @@ def badges(draft: dict, checks: dict, decisions: dict) -> Badges:
         for j, component in enumerate(item["components"]):
             capacity = component["capacity"]
             path = f"items/{i}/components/{j}/storage/capacity"
-            if capacity and capacity["automatic"] and not (
-                f"keep_original:{path}" in decisions or f"property:{path}" in decisions
-            ):
+            if capacity and capacity["automatic"] and not overrides_standard_size(decisions, path):
                 changes += 1
     return Badges(questions=questions, guesses=guesses, changes=changes, ready=questions == 0)
 

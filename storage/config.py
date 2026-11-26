@@ -35,8 +35,17 @@ def load_database_url(env_file: Path | str = DEFAULT_ENV_FILE) -> str:
 
 
 def load_test_database_url(env_file: Path | str = DEFAULT_ENV_FILE) -> str | None:
-    """The database the tests may wipe. None skips the database tests."""
-    return _setting(TEST_DATABASE_URL_SETTING, env_file)
+    """The database the tests may wipe. None skips the database tests.
+
+    Refuses the real database: the tests drop everything in the one they're given.
+    """
+    url = _setting(TEST_DATABASE_URL_SETTING, env_file)
+    if url and url == _setting(DATABASE_URL_SETTING, env_file):
+        raise StorageConfigError(
+            f"{TEST_DATABASE_URL_SETTING} is the same as {DATABASE_URL_SETTING}. The tests wipe their database, "
+            "so give them a separate one."
+        )
+    return url
 
 
 def load_originals_dir(env_file: Path | str = DEFAULT_ENV_FILE) -> Path:

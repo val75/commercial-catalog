@@ -56,13 +56,19 @@ def _apply_standard_sizes(result: dict, checks: dict, decisions: dict) -> None:
             path = f"items/{i}/components/{j}/storage/capacity"
             if not (capacity and capacity["automatic"]):
                 continue
-            if f"keep_original:{path}" in decisions or f"property:{path}" in decisions:
+            if overrides_standard_size(decisions, path):
                 continue
             prop = get_at(result, path)
             if prop is None:  # a guessed size nobody used
                 continue
             as_written = prop.get("as_written") or f"{prop['value']:g} {prop['unit']}"
             prop.update(value=capacity["value"], unit=capacity["unit"], as_written=as_written, source="standard_size")
+
+
+def overrides_standard_size(decisions: dict, path: str) -> bool:
+    """The reviewer kept the quote's size or typed one. Ticking a guessed size still gets the standard size."""
+    typed = decisions.get(f"property:{path}")
+    return f"keep_original:{path}" in decisions or (typed is not None and typed["kind"] == "set_value")
 
 
 def _apply_counts(result: dict, checks: dict, decisions: dict) -> None:

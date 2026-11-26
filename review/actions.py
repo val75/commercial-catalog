@@ -66,9 +66,7 @@ def reject(session: Session, draft_id: int, reason: str, *, by: str) -> None:
 
 def undo_approval(session: Session, draft_id: int) -> None:
     """Put the most recent approval back in the queue, with its decisions as they were."""
-    review = session.get(Review, draft_id)
-    if review is None:
-        raise LookupError(f"There's no quote {draft_id}.")
+    review = _locked(session, draft_id)
     latest = session.scalars(
         select(ApprovedQuote).order_by(ApprovedQuote.approved_at.desc(), ApprovedQuote.id.desc()).limit(1)
     ).first()
@@ -81,12 +79,22 @@ def undo_approval(session: Session, draft_id: int) -> None:
 
 
 def _open(session: Session, draft_id: int) -> tuple[Review, Draft]:
-    review = session.get(Review, draft_id)
-    if review is None:
-        raise LookupError(f"There's no quote {draft_id}.")
+    review = _locked(session, draft_id)
     if review.status != NEEDS_REVIEW:
         raise NotReviewable(f"This quote was {review.status} already.")
     return review, session.get(Draft, draft_id)
+
+
+def _locked(session: Session, draft_id: int) -> Review:
+    """The review, locked and read fresh, so overlapping requests on one quote take turns.
+
+    Without the lock, two decisions recorded at once would each write back the decisions
+    they read, and one would be lost.
+    """
+    review = session.get(Review, draft_id, with_for_update=True, populate_existing=True)
+    if review is None:
+        raise LookupError(f"There's no quote {draft_id}.")
+    return review
 
 
 def _decide(review: Review, status: str, by: str) -> None:

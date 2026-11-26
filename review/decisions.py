@@ -11,17 +11,38 @@ use_guess and set_value on one property share "property:<path>".
 
 from __future__ import annotations
 
-import copy
 import re
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
-from extraction.schema import QuoteDraft
-from review.paths import get_at, inferred_paths, property_paths, set_at
+from extraction.schema import (
+    CpuProperties,
+    DpuProperties,
+    GpuProperties,
+    ItemChassis,
+    MemoryProperties,
+    NicProperties,
+    PsuProperties,
+    RaidControllerProperties,
+    StorageProperties,
+)
+from review.paths import get_at, inferred_paths, property_paths
 
 _CAPACITY_PATH = re.compile(r"items/(\d+)/components/(\d+)/storage/capacity")
 _BASES = ("stated", "inferred")
+# Where a property sits (its path's parent) -> the schema class that types it.
+_PROPERTY_CLASSES = {
+    "cpu": CpuProperties,
+    "memory": MemoryProperties,
+    "gpu": GpuProperties,
+    "storage": StorageProperties,
+    "nic": NicProperties,
+    "dpu": DpuProperties,
+    "psu": PsuProperties,
+    "raid_controller": RaidControllerProperties,
+    "chassis": ItemChassis,
+}
 
 
 def decision_key(decision: dict) -> str:
@@ -87,14 +108,17 @@ def _set_value(draft: dict, decision: dict) -> dict:
     if value is None:
         return {"kind": "set_value", "path": path, "value": None, "basis": basis}
 
-    # Check the value against the draft schema, which also turns "28" into 28 for a count.
-    trial = copy.deepcopy(draft)
-    set_at(trial, path, {**get_at(trial, path), "value": value, "basis": basis, "reason": None})
+    # Check the value against this property's own type, which also turns "28" into 28 for a count.
+    # Only the property, so a draft stored under an older schema can still be corrected.
+    *parent, name = path.split("/")
+    properties_class = _PROPERTY_CLASSES[parent[-1]]
+    adapter = TypeAdapter(properties_class.model_fields[name].annotation)
+    candidate = {**get_at(draft, path), "value": value, "basis": basis, "reason": None}
     try:
-        checked = QuoteDraft.model_validate(trial).model_dump(mode="json")
+        checked = adapter.dump_python(adapter.validate_python(candidate), mode="json")
     except ValidationError:
-        raise ValueError(f"{value!r} isn't a valid value for {path.rsplit('/', 1)[-1].replace('_', ' ')}.") from None
-    return {"kind": "set_value", "path": path, "value": get_at(checked, path)["value"], "basis": basis}
+        raise ValueError(f"{value!r} isn't a valid value for {name.replace('_', ' ')}.") from None
+    return {"kind": "set_value", "path": path, "value": checked["value"], "basis": basis}
 
 
 def _path(decision: dict) -> str:
